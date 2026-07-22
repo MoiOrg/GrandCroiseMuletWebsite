@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { submitRegistration } from "../../app/actions";
 import { registrationSchema, type RegistrationData } from "../lib/validations";
 
 export default function RegistrationForm() {
@@ -21,9 +22,14 @@ export default function RegistrationForm() {
     },
   });
 
-  const processForm = (data: RegistrationData) => {
-    console.log("Données prêtes à être envoyées en base :", data);
-    setCurrentStep(4);
+  const processForm = async (data: RegistrationData) => {
+    // Au lieu de l'afficher dans le navigateur, on l'envoie au serveur
+    const response = await submitRegistration(data);
+    
+    // Si le serveur nous dit que tout est ok, on passe à la page de succès
+    if (response.success) {
+      setCurrentStep(4);
+    }
   };
 
   const nextStep = async () => {
