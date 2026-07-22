@@ -3,16 +3,19 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { submitRegistration } from "../../app/actions";
 import { registrationSchema, type RegistrationData } from "../lib/validations";
+import { submitRegistration, verifySponsor } from "../../app/actions";
 
 export default function RegistrationForm() {
   const [currentStep, setCurrentStep] = useState(1);
+  const [isVerifying, setIsVerifying] = useState(false); // Pour l'état de chargement
+  const [sponsorError, setSponsorError] = useState<string | null>(null);
 
   const {
     register,
     handleSubmit,
-    trigger, // Ajout de 'trigger' pour valider étape par étape
+    trigger,
+    watch, // Ajout de watch pour écouter les changements
     formState: { errors },
   } = useForm<RegistrationData>({
     resolver: zodResolver(registrationSchema),
@@ -21,6 +24,9 @@ export default function RegistrationForm() {
       acceptedWaiver: false,
     },
   });
+
+  const role = watch("role"); // On observe si l'utilisateur choisit CLIENT ou FILLEUL
+  const sponsorInfo = watch("sponsorInfo");
 
   const processForm = async (data: RegistrationData) => {
     // Au lieu de l'afficher dans le navigateur, on l'envoie au serveur
@@ -34,10 +40,27 @@ export default function RegistrationForm() {
 
   const nextStep = async () => {
     let isStepValid = true;
+    setSponsorError(null);
 
-    // Validation spécifique à l'étape en cours avant de passer à la suivante
     if (currentStep === 1) {
-      isStepValid = await trigger(["role"]); // On ajoutera "sponsorInfo" plus tard
+      isStepValid = await trigger(["role"]);
+      
+      // LOGIQUE MÉTIER : Vérification du parrain
+      if (isStepValid && role === "FILLEUL") {
+        if (!sponsorInfo) {
+          setSponsorError("Veuillez indiquer l'e-mail ou le téléphone de votre parrain.");
+          return; // On bloque
+        }
+        
+        setIsVerifying(true);
+        const result = await verifySponsor(sponsorInfo);
+        setIsVerifying(false);
+
+        if (!result.success) {
+          setSponsorError(result.message);
+          return; // On bloque et on affiche l'erreur du serveur
+        }
+      }
     } else if (currentStep === 2) {
       isStepValid = await trigger(["firstName", "lastName", "dob", "email", "phone", "zipCode"]);
     }
@@ -67,9 +90,45 @@ export default function RegistrationForm() {
         
         {/* ÉTAPE 1 : Choix du rôle */}
         {currentStep === 1 && (
-          <div className="animate-in fade-in slide-in-from-right-4 duration-300">
+          <div className="animate-in fade-in slide-in-from-right-4 duration-300 space-y-6">
             <h2 className="text-2xl font-bold mb-4">Êtes-vous client du salon ?</h2>
-            <p className="text-neutral-500 italic">Interface de l'étape 1 en construction...</p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Option Client */}
+              <label className={`relative flex flex-col p-5 border-2 rounded-xl cursor-pointer transition-all ${role === 'CLIENT' ? 'border-blue-600 bg-blue-50' : 'border-neutral-200 hover:border-blue-300 bg-white'}`}>
+                <input type="radio" value="CLIENT" {...register("role")} className="sr-only" />
+                <span className="font-bold text-neutral-900 text-lg mb-1">Oui, je suis client</span>
+                <span className="text-sm text-neutral-500">Je m'inscris directement à l'événement.</span>
+                {role === 'CLIENT' && <div className="absolute top-5 right-5 w-4 h-4 bg-blue-600 rounded-full ring-4 ring-blue-100"></div>}
+              </label>
+
+              {/* Option Filleul */}
+              <label className={`relative flex flex-col p-5 border-2 rounded-xl cursor-pointer transition-all ${role === 'FILLEUL' ? 'border-blue-600 bg-blue-50' : 'border-neutral-200 hover:border-blue-300 bg-white'}`}>
+                <input type="radio" value="FILLEUL" {...register("role")} className="sr-only" />
+                <span className="font-bold text-neutral-900 text-lg mb-1">Non, je suis invité</span>
+                <span className="text-sm text-neutral-500">Je suis parrainé par un client du salon.</span>
+                {role === 'FILLEUL' && <div className="absolute top-5 right-5 w-4 h-4 bg-blue-600 rounded-full ring-4 ring-blue-100"></div>}
+              </label>
+            </div>
+
+            {/* Champ conditionnel : Apparaît uniquement si FILLEUL est sélectionné */}
+            {role === 'FILLEUL' && (
+              <div className="animate-in fade-in slide-in-from-top-2 duration-300 bg-neutral-50 p-5 rounded-xl border border-neutral-200 mt-4">
+                <label className="block text-sm font-bold text-neutral-900 mb-2">Identifiant du parrain</label>
+                <p className="text-xs text-neutral-500 mb-3">Saisissez l'adresse e-mail ou le numéro de téléphone de la personne qui vous invite.</p>
+                <input 
+                  type="text" 
+                  {...register("sponsorInfo")} 
+                  className={`w-full px-4 py-3 bg-white border rounded-lg focus:outline-none focus:ring-2 transition-colors ${sponsorError ? 'border-red-500 focus:ring-red-500' : 'border-neutral-300 focus:ring-blue-500'}`}
+                  placeholder="ex: jean@salon.com ou 0601020304"
+                />
+                {sponsorError && (
+                  <p className="text-red-600 text-sm mt-2 font-semibold flex items-center gap-1">
+                    <span>⚠️</span> {sponsorError}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -235,9 +294,10 @@ export default function RegistrationForm() {
               <button
                 type="button"
                 onClick={nextStep}
-                className="bg-blue-600 text-white px-6 py-2 rounded-full font-medium hover:bg-blue-700 transition-colors shadow-sm"
+                disabled={isVerifying}
+                className="bg-blue-600 text-white px-6 py-2 rounded-full font-medium hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-50 flex items-center gap-2"
               >
-                Suivant
+                {isVerifying ? 'Vérification...' : 'Suivant'}
               </button>
             ) : (
               <button
